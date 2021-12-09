@@ -3,7 +3,7 @@
 package org.jetbrains.kotlin.idea.gradleJava.cocoapods
 
 import org.jetbrains.kotlin.idea.gradleTooling.EnablePodImportTask
-import org.jetbrains.plugins.gradle.model.ClassSetProjectImportModelProvider
+import org.jetbrains.plugins.gradle.model.ClassSetImportModelProvider
 import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider
 import org.jetbrains.plugins.gradle.service.project.AbstractProjectResolverExtension
 
@@ -13,8 +13,9 @@ class KotlinCocoaPodsModelResolver : AbstractProjectResolverExtension() {
     }
 
     override fun getProjectsLoadedModelProvider(): ProjectImportModelProvider {
-        return ClassSetProjectImportModelProvider(
-            setOf(EnablePodImportTask::class.java)
+        return ClassSetImportModelProvider(
+            setOf(EnablePodImportTask::class.java),
+            emptySet()
         )
     }
 }

@@ -3,12 +3,13 @@
 package org.jetbrains.kotlin.idea.gradleJava.commonizer
 
 import org.jetbrains.kotlin.idea.gradleTooling.EnableCommonizerTask
-import org.jetbrains.plugins.gradle.model.ClassSetProjectImportModelProvider
+import org.jetbrains.plugins.gradle.model.ClassSetImportModelProvider
 import org.jetbrains.plugins.gradle.service.project.AbstractProjectResolverExtension
 
 class KotlinCommonizerModelResolver : AbstractProjectResolverExtension() {
-    override fun getProjectsLoadedModelProvider() = ClassSetProjectImportModelProvider(
-        setOf(EnableCommonizerTask::class.java)
+    override fun getProjectsLoadedModelProvider() = ClassSetImportModelProvider(
+        setOf(EnableCommonizerTask::class.java),
+        emptySet()
     )
 }
 

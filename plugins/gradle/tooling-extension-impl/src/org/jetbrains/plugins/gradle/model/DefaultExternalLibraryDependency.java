@@ -60,7 +60,7 @@ public final class DefaultExternalLibraryDependency extends AbstractExternalDepe
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(super.hashCode(), file.getPath());
+    return super.hashCode() + 31 * file.getPath().hashCode();
   }
 
   @Override

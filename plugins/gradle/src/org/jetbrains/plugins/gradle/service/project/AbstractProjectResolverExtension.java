@@ -31,7 +31,7 @@ import org.gradle.tooling.model.idea.IdeaModule;
 import org.gradle.tooling.model.idea.IdeaProject;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.plugins.gradle.model.ClassSetProjectImportModelProvider;
+import org.jetbrains.plugins.gradle.model.ClassSetImportModelProvider;
 import org.jetbrains.plugins.gradle.model.ProjectImportModelProvider;
 
 import java.util.Collection;
@@ -124,7 +124,7 @@ public abstract class AbstractProjectResolverExtension implements GradleProjectR
   @Override
   public ProjectImportModelProvider getModelProvider() {
     Set<Class<?>> projectModelClasses = getExtraProjectModelClasses();
-    return projectModelClasses.isEmpty() ? null : new ClassSetProjectImportModelProvider(projectModelClasses);
+    return projectModelClasses.isEmpty() ? null : new ClassSetImportModelProvider(projectModelClasses, Collections.emptySet());
   }
 
   @NotNull

@@ -6,6 +6,8 @@ import com.amazon.ion.IonType;
 import com.amazon.ion.IonWriter;
 import com.amazon.ion.system.IonReaderBuilder;
 import com.intellij.openapi.externalSystem.model.project.dependencies.*;
+import org.gradle.internal.impldep.com.google.common.collect.Interner;
+import org.gradle.internal.impldep.com.google.common.collect.Interners;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.tooling.util.IntObjectMap;
 import org.jetbrains.plugins.gradle.tooling.util.ObjectCollector;
@@ -24,6 +26,7 @@ import static org.jetbrains.plugins.gradle.tooling.serialization.ToolingStreamAp
 public final class ProjectDependenciesSerializationService implements SerializationService<ProjectDependencies> {
   private final WriteContext myWriteContext = new WriteContext();
   private final ReadContext myReadContext = new ReadContext();
+  private final Interner<String> myStringInterner = Interners.newStrongInterner();
 
   @Override
   public byte[] write(ProjectDependencies dependencies, Class<? extends ProjectDependencies> modelClazz) throws IOException {
@@ -278,7 +281,7 @@ public final class ProjectDependenciesSerializationService implements Serializat
   }
 
   @Nullable
-  private static ProjectDependencies read(final IonReader reader, final ReadContext context) {
+  private ProjectDependencies read(final IonReader reader, final ReadContext context) {
     if (reader.next() == null) return null;
     reader.stepIn();
 
@@ -299,7 +302,7 @@ public final class ProjectDependenciesSerializationService implements Serializat
     return model;
   }
 
-  private static List<ComponentDependencies> readComponentsDependencies(IonReader reader, ReadContext context) {
+  private List<ComponentDependencies> readComponentsDependencies(IonReader reader, ReadContext context) {
     List<ComponentDependencies> list = new ArrayList<ComponentDependencies>();
     reader.next();
     reader.stepIn();
@@ -312,7 +315,7 @@ public final class ProjectDependenciesSerializationService implements Serializat
   }
 
   @Nullable
-  private static ComponentDependencies readComponentDependencies(final IonReader reader, final ReadContext context) {
+  private ComponentDependencies readComponentDependencies(final IonReader reader, final ReadContext context) {
     if (reader.next() == null) return null;
     reader.stepIn();
     ComponentDependencies dependency =
@@ -330,7 +333,7 @@ public final class ProjectDependenciesSerializationService implements Serializat
     return dependency;
   }
 
-  private static DependencyNode readDependencyNode(final IonReader reader, final ReadContext context, @Nullable String fieldName) {
+  private DependencyNode readDependencyNode(final IonReader reader, final ReadContext context, @Nullable String fieldName) {
     if (reader.next() == null) return null;
     assertFieldName(reader, fieldName);
     reader.stepIn();
@@ -343,35 +346,35 @@ public final class ProjectDependenciesSerializationService implements Serializat
           public DependencyNode newInstance() {
             String type = readString(reader, "_type");
             long id = readLong(reader, "id");
-            String resolutionState = readString(reader, "resolutionState");
-            String selectionReason = readString(reader, "selectionReason");
+            String resolutionState = intern(readString(reader, "resolutionState"));
+            String selectionReason = intern(readString(reader, "selectionReason"));
             DependencyNode node;
             if (ProjectDependencyNode.class.getSimpleName().equals(type)) {
-              String projectName = assertNotNull(readString(reader, "projectName"));
+              String projectName = intern(assertNotNull(readString(reader, "projectName")));
               node = new ProjectDependencyNodeImpl(id, projectName);
             }
             else if (ArtifactDependencyNode.class.getSimpleName().equals(type)) {
-              String group = assertNotNull(readString(reader, "group"));
-              String module = assertNotNull(readString(reader, "module"));
-              String version = assertNotNull(readString(reader, "version"));
+              String group = intern(assertNotNull(readString(reader, "group")));
+              String module = intern(assertNotNull(readString(reader, "module")));
+              String version = intern(assertNotNull(readString(reader, "version")));
               node = new ArtifactDependencyNodeImpl(id, group, module, version);
             }
             else if (FileCollectionDependencyNode.class.getSimpleName().equals(type)) {
-              String displayName = assertNotNull(readString(reader, "displayName"));
-              String path = assertNotNull(readString(reader, "path"));
+              String displayName = intern(assertNotNull(readString(reader, "displayName")));
+              String path = intern(assertNotNull(readString(reader, "path")));
               node = new FileCollectionDependencyNodeImpl(id, displayName, path);
             }
             else if (DependencyScopeNode.class.getSimpleName().equals(type)) {
-              String scope = assertNotNull(readString(reader, "scope"));
-              String displayName = assertNotNull(readString(reader, "displayName"));
-              String description = assertNotNull(readString(reader, "description"));
+              String scope = intern(assertNotNull(readString(reader, "scope")));
+              String displayName = intern(assertNotNull(readString(reader, "displayName")));
+              String description = intern(assertNotNull(readString(reader, "description")));
               node = new DependencyScopeNode(id, scope, displayName, description);
             }
             else if (ReferenceNode.class.getSimpleName().equals(type)) {
               node = new ReferenceNode(id);
             }
             else if (UnknownDependencyNode.class.getSimpleName().equals(type)) {
-              String name = assertNotNull(readString(reader, "name"));
+              String name = intern(assertNotNull(readString(reader, "name")));
               node = new UnknownDependencyNode(id, name);
             }
             else {
@@ -395,7 +398,11 @@ public final class ProjectDependenciesSerializationService implements Serializat
     return dependency;
   }
 
-  private static Collection<? extends DependencyNode> readDependencyNodes(IonReader reader, ReadContext context) {
+  private String intern(String string) {
+    return string == null ? null : myStringInterner.intern(string);
+  }
+
+  private Collection<? extends DependencyNode> readDependencyNodes(IonReader reader, ReadContext context) {
     List<DependencyNode> list = new ArrayList<DependencyNode>();
     reader.next();
     reader.stepIn();

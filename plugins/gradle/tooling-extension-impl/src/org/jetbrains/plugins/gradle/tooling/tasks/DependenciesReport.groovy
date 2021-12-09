@@ -10,8 +10,6 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.Dependency
 import org.gradle.api.artifacts.FileCollectionDependency
-import org.gradle.api.artifacts.component.ComponentIdentifier
-import org.gradle.api.artifacts.component.ComponentSelector
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.result.*
@@ -19,12 +17,10 @@ import org.gradle.api.file.FileCollection
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
-import org.gradle.api.tasks.diagnostics.internal.graph.nodes.AbstractRenderableDependencyResult
-import org.gradle.api.tasks.diagnostics.internal.graph.nodes.AbstractRenderableModuleResult
-import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableDependency
-import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableModuleResult
-import org.gradle.api.tasks.diagnostics.internal.graph.nodes.RenderableUnresolvedDependencyResult
 import org.gradle.util.GradleVersion
+
+import java.util.concurrent.atomic.AtomicLong
+import java.util.function.Function
 
 @CompileStatic
 class DependenciesReport extends DefaultTask {
@@ -36,6 +32,7 @@ class DependenciesReport extends DefaultTask {
 
   @TaskAction
   void generate() {
+    def generator = new ReportGenerator()
     Collection<Configuration> configurationList
     if (configurations.isEmpty()) {
       configurationList = project.configurations
@@ -54,107 +51,138 @@ class DependenciesReport extends DefaultTask {
     List<DependencyScopeNode> graph = []
     for (configuration in configurationList) {
       if (!configuration.isCanBeResolved()) continue
-      graph.add(doBuildDependenciesGraph(configuration, project, projectNameFunction))
+      graph.add(generator.doBuildDependenciesGraph(configuration, project, projectNameFunction))
     }
     outputFile.parentFile.mkdirs()
     outputFile.text = new GsonBuilder().create().toJson(graph)
   }
 
-  static DependencyScopeNode buildDependenciesGraph(Configuration configuration, Project project) {
-    return doBuildDependenciesGraph(configuration, project, new ProjectNameFunction())
-  }
+  static class ReportGenerator {
+    private AtomicLong nextId = new AtomicLong()
 
-  private static DependencyScopeNode doBuildDependenciesGraph(Configuration configuration,
-                                                              Project project,
-                                                              ProjectNameFunction projectNameFunction) {
-    if (!project.configurations.contains(configuration)) {
-      throw new IllegalArgumentException("configurations of the project should be used")
+    DependencyScopeNode buildDependenciesGraph(Configuration configuration, Project project) {
+      return doBuildDependenciesGraph(configuration, project, new ProjectNameFunction())
     }
-    ResolutionResult resolutionResult = configuration.getIncoming().getResolutionResult()
-    RenderableDependency root = GradleVersion.current() >= GradleVersion.version("6.0") ?
-                                new CustomRenderableModuleResult(resolutionResult.root) :
-                                new RenderableModuleResult(resolutionResult.root)
-    String configurationName = configuration.name
-    IdGenerator idGenerator = new IdGenerator()
-    long id = idGenerator.getId(root, configurationName)
-    String scopeDisplayName = "project " + project.path + " (" + configurationName + ")"
-    DependencyScopeNode node = new DependencyScopeNode(id, configurationName, scopeDisplayName, configuration.getDescription())
-    node.setResolutionState(root.resolutionState.name())
-    for (Dependency dependency : configuration.getAllDependencies()) {
-      if (dependency instanceof FileCollectionDependency) {
-        FileCollection fileCollection = ((FileCollectionDependency)dependency).getFiles()
-        if (fileCollection instanceof Configuration) continue
-        def files = fileCollection.files
-        if (files.isEmpty()) continue
 
-        String displayName = null
-        if (fileCollection instanceof Describable) {
-          displayName = ((Describable)fileCollection).displayName
-        }
-        else {
-          def string = fileCollection.toString()
-          if ("file collection" != string) {
-            displayName = string
+    private DependencyScopeNode doBuildDependenciesGraph(Configuration configuration,
+                                                                Project project,
+                                                                ProjectNameFunction projectNameFunction) {
+      if (!project.configurations.contains(configuration)) {
+        throw new IllegalArgumentException("configurations of the project should be used")
+      }
+      IdGenerator idGenerator = new IdGenerator(nextId)
+      ResolutionResult resolutionResult = configuration.incoming.resolutionResult
+      ResolvedComponentResult root = resolutionResult.root
+      String configurationName = configuration.name
+      long id = idGenerator.getId(root.id)
+      String scopeDisplayName = "project " + project.path + " (" + configurationName + ")"
+      DependencyScopeNode node = new DependencyScopeNode(id, configurationName, scopeDisplayName, configuration.description)
+      node.setResolutionState(root.id.displayName)
+      for (Dependency dependency : configuration.allDependencies) {
+        if (dependency instanceof FileCollectionDependency) {
+          FileCollection fileCollection = dependency.files
+          if (fileCollection instanceof Configuration) continue
+          def files = fileCollection.files
+          if (files.empty) continue
+
+          String displayName = null
+          if (fileCollection instanceof Describable) {
+            displayName = fileCollection.getDisplayName()
           }
-        }
+          else {
+            def string = fileCollection.toString()
+            if ("file collection" != string) {
+              displayName = string
+            }
+          }
 
-        if (displayName != null) {
-          long fileDepId = idGenerator.getId(displayName, configurationName)
-          node.dependencies.add(new FileCollectionDependencyNodeImpl(fileDepId, displayName, fileCollection.getAsPath()))
-        }
-        else {
-          for (File file : files) {
-            long fileDepId = idGenerator.getId(file.path, configurationName)
-            node.dependencies.add(new FileCollectionDependencyNodeImpl(fileDepId, file.name, file.path))
+          if (displayName != null) {
+            long fileDepId = idGenerator.getId(displayName)
+            node.dependencies.add(new FileCollectionDependencyNodeImpl(fileDepId, displayName, fileCollection.asPath))
+          }
+          else {
+            for (File file : files) {
+              long fileDepId = idGenerator.getId(file.path)
+              node.dependencies.add(new FileCollectionDependencyNodeImpl(fileDepId, file.name, file.path))
+            }
           }
         }
       }
+
+      Map<Object, DependencyNode> added = [:]
+
+      def iterator = root.dependencies.iterator()
+      while (iterator.hasNext()) {
+        DependencyResult child = iterator.next()
+        node.dependencies.add(toNode(child, added, idGenerator, projectNameFunction))
+      }
+      return node
     }
 
-    Map<Object, DependencyNode> added = [:]
-    root.getChildren().each { RenderableDependency child ->
-      node.dependencies.add(toNode(child, configurationName, added, idGenerator, projectNameFunction))
-    }
-    return node
-  }
+    static private DependencyNode toNode(DependencyResult dependency,
+                                         Map<Object, DependencyNode> added,
+                                         IdGenerator idGenerator,
+                                         ProjectNameFunction projectNameFunction) {
 
-  static private DependencyNode toNode(RenderableDependency dependency,
-                                       String configurationName,
-                                       Map<Object, DependencyNode> added,
-                                       IdGenerator idGenerator,
-                                       ProjectNameFunction projectNameFunction) {
-    long id = idGenerator.getId(dependency, configurationName)
-    DependencyNode alreadySeenNode = added.get(id)
-    if (alreadySeenNode != null) {
-      return new ReferenceNode(id)
-    }
+      def selectedOrAttempted = dependency instanceof ResolvedDependencyResult
+        ? dependency.selected.id
+        : (dependency as UnresolvedDependencyResult).attempted
+      long id = idGenerator.getId(selectedOrAttempted)
+      DependencyNode alreadySeenNode = added.get(id)
+      if (alreadySeenNode != null) {
+        return new ReferenceNode(id)
+      }
 
-    AbstractDependencyNode node
-    if (dependency.id instanceof ProjectComponentIdentifier) {
-      ProjectComponentIdentifier projectId = dependency.id as ProjectComponentIdentifier
-      node = new ProjectDependencyNodeImpl(id, projectNameFunction.fun(projectId))
-    }
-    else if (dependency.id instanceof ModuleComponentIdentifier) {
-      ModuleComponentIdentifier moduleId = dependency.id as ModuleComponentIdentifier
-      node = new ArtifactDependencyNodeImpl(id, moduleId.group, moduleId.module, moduleId.version)
-    }
-    else {
-      node = new UnknownDependencyNode(id, dependency.name)
-    }
-    node.setResolutionState(dependency.resolutionState.name())
-    if (dependency instanceof CustomRenderableDependencyResult) {
-      ComponentSelectionReason selectionReason = dependency.selectionReason
-        if (!selectionReason.descriptions.isEmpty()) {
-          node.selectionReason = selectionReason.descriptions.last().description
+      AbstractDependencyNode node
+      if (dependency instanceof ResolvedDependencyResult) {
+        def componentId = dependency.selected.id
+        if (componentId instanceof ProjectComponentIdentifier) {
+          node = new ProjectDependencyNodeImpl(id, projectNameFunction.fun(componentId))
         }
+        else if (componentId instanceof ModuleComponentIdentifier) {
+          node = new ArtifactDependencyNodeImpl(id, componentId.getGroup(), componentId.getModule(), componentId.getVersion())
+        }
+        else {
+          node = new UnknownDependencyNode(id, componentId.displayName)
+        }
+        node.resolutionState = "RESOLVED"
+        node.selectionReason = dependency.selected.selectionReason.descriptions.last().description
+        added.put(id, node)
+        def iterator = dependency.selected.dependencies.iterator()
+        while (iterator.hasNext()) {
+          DependencyResult child = iterator.next()
+          node.dependencies.add(toNode(child, added, idGenerator, projectNameFunction))
+        }
+      } else if (dependency instanceof UnresolvedDependencyResult) {
+        node = new UnknownDependencyNode(id, dependency.attempted.displayName)
+        node.resolutionState = "UNRESOLVED"
+        added.put(id, node)
+      } else {
+        throw new IllegalStateException("Unsupported dependency result type: $dependency")
+      }
+
+      return node
     }
-    added.put(id, node)
-    Iterator<? extends RenderableDependency> iterator = dependency.getChildren().iterator()
-    while (iterator.hasNext()) {
-      RenderableDependency child = iterator.next()
-      node.dependencies.add(toNode(child, configurationName, added, idGenerator, projectNameFunction))
+
+    private static class IdGenerator {
+      private Map<Object, Long> idMap = new HashMap<>()
+      private AtomicLong nextId
+
+      IdGenerator(AtomicLong nextId) {
+        this.nextId = nextId
+      }
+
+      long getId(Object key) {
+        def existingId = idMap.get(key)
+        if (existingId != null) {
+          return existingId
+        }
+
+        def newId = nextId.incrementAndGet()
+        idMap.put(key, newId)
+        return newId
+      }
     }
-    return node
   }
 
   static class ProjectNameFunction {
@@ -165,80 +193,4 @@ class DependenciesReport extends DefaultTask {
     }
   }
 
-  private static class IdGenerator {
-    private Map<String, Long> idMap = new HashMap<>()
-    private long value
-
-    private long getId(String prefix, String configurationName) {
-      def key = prefix + '_' + configurationName
-      def id = idMap.get(key)
-      if (id == null) {
-        idMap[key] = ++value
-        id = value
-      }
-      return id
-    }
-
-    private long getId(RenderableDependency dependency, String configurationName) {
-      return getId(dependency.id.toString(), configurationName)
-    }
-  }
-
-  private static class CustomRenderableModuleResult extends AbstractRenderableModuleResult {
-    CustomRenderableModuleResult(ResolvedComponentResult module) {
-      super(module)
-    }
-
-    Set<RenderableDependency> getChildren() {
-      Set<RenderableDependency> out = new LinkedHashSet()
-
-      for (def dependencyResult in this.module.getDependencies()) {
-        if (dependencyResult instanceof UnresolvedDependencyResult) {
-          out.add(new RenderableUnresolvedDependencyResult((UnresolvedDependencyResult)dependencyResult))
-        }
-        else {
-          out.add(new CustomRenderableDependencyResult((ResolvedDependencyResult)dependencyResult))
-        }
-      }
-
-      return out
-    }
-  }
-
-  private static class CustomRenderableDependencyResult extends AbstractRenderableDependencyResult {
-    private final ResolvedDependencyResult dependency
-
-    CustomRenderableDependencyResult(ResolvedDependencyResult dependency) {
-      this.dependency = dependency
-    }
-
-    ResolutionState getResolutionState() {
-      return this.dependency.isConstraint() ? ResolutionState.RESOLVED_CONSTRAINT : ResolutionState.RESOLVED
-    }
-
-    ComponentIdentifier getActual() {
-      return this.dependency.getSelected().getId()
-    }
-
-    ComponentSelector getRequested() {
-      return this.dependency.getRequested()
-    }
-
-    ComponentSelectionReason getSelectionReason() {
-      return dependency.selected.selectionReason
-    }
-
-    Set<RenderableDependency> getChildren() {
-      Set<RenderableDependency> out = new LinkedHashSet()
-      for (def dependencyResult in dependency.getSelected().dependencies) {
-        if (dependencyResult instanceof UnresolvedDependencyResult) {
-          out.add(new RenderableUnresolvedDependencyResult((UnresolvedDependencyResult)dependencyResult))
-        }
-        else {
-          out.add(new CustomRenderableDependencyResult((ResolvedDependencyResult)dependencyResult))
-        }
-      }
-      return out
-    }
-  }
 }

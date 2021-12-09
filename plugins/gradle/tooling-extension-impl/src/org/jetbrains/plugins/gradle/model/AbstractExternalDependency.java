@@ -171,7 +171,7 @@ public abstract class AbstractExternalDependency implements ExternalDependency {
 
   @Override
   public int hashCode() {
-    return 31 + Objects.hashCode(myId, myScope, myClasspathOrder);
+    return myId.hashCode() + 31* ( myScope == null ? 0 : myScope.hashCode()  + 31*  myClasspathOrder);
   }
 
   protected static int calcFilesPathsHashCode(@NotNull Iterable<File> iterable) {

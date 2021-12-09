@@ -83,7 +83,7 @@ public class DefaultExternalProjectDependency extends AbstractExternalDependency
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(super.hashCode(), projectPath, configurationName);
+    return super.hashCode()+ 31* (projectPath.hashCode() + 31* configurationName.hashCode());
   }
 
   @Override

@@ -119,7 +119,7 @@ public final class DefaultExternalDependencyId implements ExternalDependencyId, 
 
   @Override
   public int hashCode() {
-    return Objects.hashCode(group, name, packaging, classifier, version);
+    return group == null ? 0 : group.hashCode() + 31*( name == null ? 0 : name.hashCode() + 31*(packaging.hashCode() + 31* (classifier == null ? 0 : classifier.hashCode() + 31* (version == null ? 0 : version.hashCode()))));
   }
 
   @Override
