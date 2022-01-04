@@ -184,13 +184,13 @@ public class ProjectImportAction implements BuildAction<ProjectImportAction.AllM
     Set<String> processedBuildsPaths = new HashSet<String>();
     String rootBuildPath = rootBuild.getBuildIdentifier().getRootDir().getPath();
     processedBuildsPaths.add(rootBuildPath);
-    Queue<GradleBuild> queue = new LinkedList<GradleBuild>(rootBuild.getIncludedBuilds());
+    Queue<GradleBuild> queue = new LinkedList<GradleBuild>(rootBuild.getEditableBuilds());
     while (!queue.isEmpty()) {
       GradleBuild includedBuild = queue.remove();
       String includedBuildPath = includedBuild.getBuildIdentifier().getRootDir().getPath();
       if (processedBuildsPaths.add(includedBuildPath)) {
         buildConsumer.accept(includedBuild);
-        queue.addAll(includedBuild.getIncludedBuilds());
+        queue.addAll(includedBuild.getEditableBuilds());
       }
     }
   }
